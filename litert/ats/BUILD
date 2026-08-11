@@ -35,6 +35,7 @@ package(
 
 XNNPACK_DONT_REGISTER = [
     "(_i32<[^>]+>(?!_cst)|->[(][^)]*_i32)",  # XNNPACK does not support dynamic int32 math (allows int32 static constants)
+    "Comparison",  # XNNPACK does not support Comparison ops
     "OneHot",  # XNNPACK does not support OneHot
     "Transformer",  # XNNPACK does not support TransformerLayer flex/custom ops
     "SdpaTransposed",  # XNNPACK does not support SdpaTransposed composite op
@@ -68,6 +69,7 @@ XNNPACK_DONT_REGISTER = [
 
 YNNPACK_DONT_REGISTER = [
     "Binary.*i32",  # YNNPACK does not support int32 binary arithmetic
+    "Comparison",  # YNNPACK does not support Comparison ops
     "OneHot",  # YNNPACK does not support OneHot
     "SelectV2",  # YNNPACK does not support SelectV2
     "tfl\\.floor_div",  # YNNPACK does not support FloorDiv
@@ -319,6 +321,7 @@ litert_define_ats(
     compile_only_suffix = None,
     dont_register = [
         "(_i32<[^>]+>(?!_cst)|->[(][^)]*_i32)",  # XNNPACK does not support dynamic int32 math (allows int32 static constants)
+        "Comparison",  # XNNPACK does not support Comparison ops
         "OneHot",  # XNNPACK does not support OneHot
         "Transformer",  # XNNPACK does not support TransformerLayer flex/custom ops
         "SdpaTransposed",  # XNNPACK does not support SdpaTransposed composite op
@@ -565,6 +568,7 @@ cc_library(
         ":register_batch_matmul",
         ":register_binary_broadcast",
         ":register_binary_no_bcast",
+        ":register_comparison",
         ":register_concatenation",
         ":register_conv_2d",
         ":register_depthwise_conv_2d",
@@ -654,6 +658,25 @@ cc_library(
         "//litert/test/generators:binary_no_bcast",
         "//litert/test/generators:common",
         "//tflite/schema:schema_fbs",
+    ],
+)
+
+cc_library(
+    name = "register_comparison",
+    testonly = True,
+    srcs = ["register_comparison.cc"],
+    hdrs = ["register_comparison.h"],
+    copts = commandline_flag_copts(),
+    deps = [
+        ":compile_fixture",
+        ":configure",
+        ":inference_fixture",
+        ":register",
+        "//litert/c:litert_op_code",
+        "//litert/cc/internal:litert_detail",
+        "//litert/test/generators:common",
+        "//litert/test/generators:comparison",
+        "//tflite/types:half",
     ],
 )
 

@@ -354,5 +354,42 @@ TEST(ReferenceEvaluatorTest, RunChainedComposites) {
   EXPECT_THAT(outputs[0].Span<float>(), Pointwise(FloatNear(1e-5f), expected));
 }
 
+TEST(ReferenceEvaluatorTest, RunCompositeComparison) {
+  using TensorTf = litert::tensor::Tensor<litert::tensor::TfLiteMixinTag>;
+
+  TensorTf in1 =
+      litert::tensor::Create("in1", litert::tensor::ApiType<float>::value, {3});
+  TensorTf in2 =
+      litert::tensor::Create("in2", litert::tensor::ApiType<float>::value, {1});
+
+  TensorTf out = litert::tensor::StableHLOComposite(
+      litert::tensor::StableHLOCompositeOptions{.name = "test_comparison"},
+      [](auto x, auto y) { return litert::tensor::GreaterEqual(x, y); }, in1,
+      in2);
+
+  LITERT_ASSERT_OK_AND_ASSIGN(auto model,
+                              litert::testing::SaveTensorGraph({out}));
+
+  LITERT_ASSERT_OK_AND_ASSIGN(auto b1, SimpleBuffer::Create<float>({3}));
+  LITERT_ASSERT_OK_AND_ASSIGN(auto b2, SimpleBuffer::Create<float>({1}));
+  LITERT_ASSERT_OK_AND_ASSIGN(auto b_out, SimpleBuffer::Create<bool>({3}));
+
+  b1.Span<float>()[0] = 1.0f;
+  b1.Span<float>()[1] = 2.0f;
+  b1.Span<float>()[2] = 3.0f;
+  b2.Span<float>()[0] = 2.0f;
+
+  VarBuffers inputs;
+  inputs.push_back(std::move(b1));
+  inputs.push_back(std::move(b2));
+  VarBuffers outputs;
+  outputs.push_back(std::move(b_out));
+
+  LITERT_ASSERT_OK(ReferenceEvaluator::Evaluate(*model, inputs, outputs));
+
+  EXPECT_THAT(outputs[0].Span<bool>(),
+              ::testing::ElementsAre(false, true, true));
+}
+
 }  // namespace
 }  // namespace litert::testing
