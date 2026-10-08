@@ -67,7 +67,6 @@ litert_accelerator_library(
         "//ml_drift_delegate/delegate:delegate_types",
         "//ml_drift_delegate/delegate:delegate_webgpu",
         "//tflite/c:c_api_types",
-        "@ml_drift//ml_drift/cl:opencl_wrapper",
     ],
 )
 
@@ -100,7 +99,6 @@ litert_accelerator_library(
         "//ml_drift_delegate/delegate:delegate_types",
         "//ml_drift_delegate/delegate:delegate_webgpu",
         "//tflite/c:c_api_types",
-        "@ml_drift//ml_drift/cl:opencl_wrapper",
     ],
 )
 
@@ -146,9 +144,11 @@ cc_test(
         "//ml_drift_delegate/delegate:delegate_data",
         "//ml_drift_delegate/delegate:delegate_options",
         "//ml_drift_delegate/delegate:delegate_types",
+        "//ml_drift_delegate/delegate:delegate_utils",
         "//ml_drift_delegate/delegate:gpu_backend",
         "//tflite/c:c_api_types",
         "//tflite/c:common",
+        "//weight_loader:external_weight_loader",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",

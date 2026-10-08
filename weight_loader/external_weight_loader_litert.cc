@@ -59,21 +59,54 @@
 namespace weight_loader {
 
 WeightAccess::WeightAccess() = default;
-WeightAccess::WeightAccess(WeightAccess&&) noexcept = default;
-WeightAccess& WeightAccess::operator=(WeightAccess&&) noexcept = default;
-WeightAccess::~WeightAccess() = default;
+
+WeightAccess::WeightAccess(WeightAccess&& other) noexcept
+    : host_tensor_buffer_(std::exchange(other.host_tensor_buffer_, nullptr)),
+      host_deleter_(std::exchange(other.host_deleter_, {})),
+      device_tensor_buffer_(
+          std::exchange(other.device_tensor_buffer_, nullptr)),
+      device_deleter_(std::exchange(other.device_deleter_, {})) {}
+
+WeightAccess& WeightAccess::operator=(WeightAccess&& other) noexcept {
+  if (this != &other) {
+    Reset();
+    host_tensor_buffer_ = std::exchange(other.host_tensor_buffer_, nullptr);
+    host_deleter_ = std::exchange(other.host_deleter_, {});
+    device_tensor_buffer_ = std::exchange(other.device_tensor_buffer_, nullptr);
+    device_deleter_ = std::exchange(other.device_deleter_, {});
+  }
+  return *this;
+}
+
+WeightAccess::~WeightAccess() { Reset(); }
 
 void WeightAccess::Reset() {
-  host_tensor_buffer = nullptr;
-  device_tensor_buffer = nullptr;
+  if (host_tensor_buffer_ != nullptr) {
+    host_deleter_(host_tensor_buffer_);
+    host_tensor_buffer_ = nullptr;
+  }
+  host_deleter_ = {};
+  if (device_tensor_buffer_ != nullptr) {
+    device_deleter_(device_tensor_buffer_);
+    device_tensor_buffer_ = nullptr;
+  }
+  device_deleter_ = {};
 }
 
 void WeightAccess::SetHostBuffer(LiteRtTensorBufferPtr buffer) {
-  host_tensor_buffer = std::move(buffer);
+  if (host_tensor_buffer_ != nullptr) {
+    host_deleter_(host_tensor_buffer_);
+  }
+  host_deleter_ = buffer.get_deleter();
+  host_tensor_buffer_ = buffer.release();
 }
 
 void WeightAccess::SetDeviceBuffer(LiteRtTensorBufferPtr buffer) {
-  device_tensor_buffer = std::move(buffer);
+  if (device_tensor_buffer_ != nullptr) {
+    device_deleter_(device_tensor_buffer_);
+  }
+  device_deleter_ = buffer.get_deleter();
+  device_tensor_buffer_ = buffer.release();
 }
 
 namespace {
@@ -84,10 +117,6 @@ WebWeightUploadCallback g_web_weight_upload_callback = nullptr;
 
 // Information about a single external weight tensor.
 struct LiteRtWeightInfo : public WeightInfo {
-  // The index of the subgraph that contains the tensor.
-  uint32_t subgraph_index;
-  // The index of the tensor in the subgraph.
-  uint32_t tensor_index;
   // The ID of the group that the tensor belongs to. Tensors in the same group
   // are typically stored together in the same external file.
   uint32_t group_id;
@@ -759,7 +788,7 @@ void ParseFlatBuffer(const tflite::Model& model,
       slice_key.group_id = info.group_id;
       slice_key.offset = info.offset;
       slice_key.length = info.length;
-      slice_key.packing = std::string(info.packing);
+      slice_key.packing = info.packing;
       auto [canonical_it, _] = canonical_slice_ids.emplace(
           std::move(slice_key), info.external_buffer_id);
       canonical_ids.emplace(info.external_buffer_id, canonical_it->second);

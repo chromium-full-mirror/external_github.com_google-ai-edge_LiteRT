@@ -16,7 +16,6 @@
 #include <memory>
 #include <utility>
 
-#include "ml_drift/cl/opencl_wrapper.h"  // from @ml_drift
 #include "litert/c/internal/litert_accelerator_def.h"
 #include "litert/c/internal/litert_logging.h"
 #include "litert/c/internal/litert_runtime_context.h"
@@ -104,6 +103,7 @@ class GpuAccelerator {
                                      LiteRtAcceleratorConst accelerator,
                                      LiteRtOptions options,
                                      LiteRtDelegateWrapper* delegate_wrapper) {
+    active_runtime_context_ = runtime_context;
     active_env_ = env;
     litert::TfLiteDelegatePtr delegate_ptr{nullptr, nullptr};
     LITERT_RETURN_IF_ERROR(CreateGpuDelegateImpl(
@@ -117,6 +117,7 @@ class GpuAccelerator {
   }
 
   static LiteRtGpuBackend active_backend_;
+  static LiteRtRuntimeContext* active_runtime_context_;
   static LiteRtEnvironment active_env_;
 
   static LiteRtStatus CreateGpuMemory(LiteRtGpuDeviceId device_id,
@@ -197,7 +198,52 @@ class GpuAccelerator {
 };
 
 LiteRtGpuBackend GpuAccelerator::active_backend_ = kLiteRtGpuBackendAutomatic;
+LiteRtRuntimeContext* GpuAccelerator::active_runtime_context_ = nullptr;
 LiteRtEnvironment GpuAccelerator::active_env_ = nullptr;
+
+namespace {
+
+void ResolveOpenClResources(LiteRtRuntimeContext* runtime_context,
+                            LiteRtEnvironment active_env,
+                            LiteRtGpuDeviceId& device_id,
+                            LiteRtGpuQueueId& queue_id) {
+  if (active_env == nullptr) {
+    return;
+  }
+  if (runtime_context != nullptr &&
+      runtime_context->get_environment_options != nullptr &&
+      runtime_context->get_environment_options_value != nullptr) {
+    LiteRtEnvironmentOptions env_options = nullptr;
+    if (runtime_context->get_environment_options(active_env, &env_options) ==
+            kLiteRtStatusOk &&
+        env_options != nullptr) {
+      LiteRtAny option{};
+      if (runtime_context->get_environment_options_value(
+              env_options, kLiteRtEnvOptionTagOpenClContext, &option) ==
+              kLiteRtStatusOk &&
+          option.type == kLiteRtAnyTypeInt) {
+        device_id = reinterpret_cast<void*>(option.int_value);
+      }
+      if (runtime_context->get_environment_options_value(
+              env_options, kLiteRtEnvOptionTagOpenClCommandQueue, &option) ==
+              kLiteRtStatusOk &&
+          option.type == kLiteRtAnyTypeInt) {
+        queue_id = reinterpret_cast<void*>(option.int_value);
+      }
+    }
+    return;
+  }
+  auto option = active_env->GetOption(kLiteRtEnvOptionTagOpenClContext);
+  if (option.has_value() && option->type == kLiteRtAnyTypeInt) {
+    device_id = reinterpret_cast<void*>(option->int_value);
+  }
+  option = active_env->GetOption(kLiteRtEnvOptionTagOpenClCommandQueue);
+  if (option.has_value() && option->type == kLiteRtAnyTypeInt) {
+    queue_id = reinterpret_cast<void*>(option->int_value);
+  }
+}
+
+}  // namespace
 
 LiteRtStatus GpuAccelerator::CreateGpuMemory(
     LiteRtGpuDeviceId device_id, LiteRtGpuQueueId queue_id,
@@ -213,16 +259,8 @@ LiteRtStatus GpuAccelerator::CreateGpuMemory(
         LiteRtCreateWebGpuMemory(device_id, queue_id, tensor_type, buffer_type,
                                  bytes, packed_bytes, &wrapper->real_info);
   } else {
-    if (active_env_ != nullptr) {
-      auto option = active_env_->GetOption(kLiteRtEnvOptionTagOpenClContext);
-      if (option.has_value() && option->type == kLiteRtAnyTypeInt) {
-        device_id = reinterpret_cast<void*>(option->int_value);
-      }
-      option = active_env_->GetOption(kLiteRtEnvOptionTagOpenClCommandQueue);
-      if (option.has_value() && option->type == kLiteRtAnyTypeInt) {
-        queue_id = reinterpret_cast<void*>(option->int_value);
-      }
-    }
+    ResolveOpenClResources(active_runtime_context_, active_env_, device_id,
+                           queue_id);
     status =
         LiteRtCreateOpenClMemory(device_id, queue_id, tensor_type, buffer_type,
                                  bytes, packed_bytes, &wrapper->real_info);
@@ -294,16 +332,8 @@ LiteRtStatus GpuAccelerator::ImportGpuMemory(
                                       buffer_type, hw_buffer_handle, bytes,
                                       packed_bytes, &wrapper->real_info);
   } else {
-    if (active_env_ != nullptr) {
-      auto option = active_env_->GetOption(kLiteRtEnvOptionTagOpenClContext);
-      if (option.has_value() && option->type == kLiteRtAnyTypeInt) {
-        device_id = reinterpret_cast<void*>(option->int_value);
-      }
-      option = active_env_->GetOption(kLiteRtEnvOptionTagOpenClCommandQueue);
-      if (option.has_value() && option->type == kLiteRtAnyTypeInt) {
-        queue_id = reinterpret_cast<void*>(option->int_value);
-      }
-    }
+    ResolveOpenClResources(active_runtime_context_, active_env_, device_id,
+                           queue_id);
     status = LiteRtImportOpenClMemory(device_id, queue_id, tensor_type,
                                       buffer_type, hw_buffer_handle, bytes,
                                       packed_bytes, &wrapper->real_info);
