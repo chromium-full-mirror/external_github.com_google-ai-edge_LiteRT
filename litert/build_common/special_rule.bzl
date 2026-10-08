@@ -139,8 +139,8 @@ def litert_metal_linkopts():
 
 def litert_metal_deps_without_gpu_environment():
     return select({
-        "//litert:ios": ["//tflite/delegates/gpu/metal:metal_device"],
-        "//litert:macos": ["//tflite/delegates/gpu/metal:metal_device"],
+        "//litert:ios": ["@ml_drift//ml_drift/metal:metal_device"],
+        "//litert:macos": ["@ml_drift//ml_drift/metal:metal_device"],
         "//conditions:default": [],
     })
 

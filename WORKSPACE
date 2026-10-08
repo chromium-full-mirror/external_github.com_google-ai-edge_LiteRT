@@ -501,10 +501,12 @@ ML_DRIFT_SHA256 = "0a7384901754a4ee84220561bcf5447fde4363cbc8a42c94743f183d178fe
 
 http_archive(
     name = "ml_drift",
+    patch_args = ["-p0"],
     patch_cmds = [
         # Add external/ml_drift to flatc include paths for gl_inference_context_cc_fbs.
         "sed -i -e 's|\"-I .\",|\"-I .\", \"-I external/ml_drift\",|g' ml_drift/gl/BUILD",
     ],
+    patches = ["@//:PATCH.mldrift_metal"],
     repo_mapping = {
         "@fp16": "@FP16",
         "@com_github_google_re2": "@com_googlesource_code_re2",

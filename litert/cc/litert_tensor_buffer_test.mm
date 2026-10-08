@@ -30,9 +30,9 @@
 #include "litert/cc/litert_tensor_buffer.h"
 #include "litert/test/common.h"
 #include "litert/test/matchers.h"
+#import "third_party/ml_drift/metal/metal_device.h"
 #import "third_party/odml/litert/litert/test/metal_test_helper.h"
 #include "litert/test/testdata/simple_model_test_vectors.h"
-#import "third_party/tensorflow/lite/delegates/gpu/metal/metal_device.h"
 
 @interface LitertTensorBufferTest : XCTestCase
 @end
@@ -47,7 +47,7 @@ const float kTolerance = 1e-5;
 
 // Create LiteRt environment with metal options.
 - (litert::Environment)createEnvironmentWithMetalDevice:
-    (tflite::gpu::metal::MetalDevice *)metal_device {
+    (ml_drift::metal::MetalDevice *)metal_device {
   std::vector<litert::EnvironmentOptions::Option> environment_options;
   environment_options.push_back({litert::EnvironmentOptions::Tag::kMetalDevice,
                                  (__bridge const void *)(metal_device->device())});
@@ -64,7 +64,7 @@ const float kTolerance = 1e-5;
 - (void)testTensorBufferMetalMemory {
   XCTAssertTrue(litert::HasMetalSupport());
 
-  auto metal_device = tflite::gpu::metal::MetalDevice();
+  auto metal_device = ml_drift::metal::MetalDevice();
   litert::Environment env = [self createEnvironmentWithMetalDevice:&metal_device];
 
   const litert::RankedTensorType kTensorType(kTestTensorType);
@@ -118,7 +118,7 @@ const float kTolerance = 1e-5;
 - (litert::TensorBuffer)createManagedTensorBufferForInput:(int)input_index
                                           withEnvironment:(litert::Environment *)env
                                           withMetalDevice:
-                                              (tflite::gpu::metal::MetalDevice *)metal_device
+                                              (ml_drift::metal::MetalDevice *)metal_device
                                         withCompiledModel:(litert::CompiledModel *)compiled_model {
   auto input_tensor_type = compiled_model->GetInputTensorType(
       /*signature_index=*/0, input_index);
@@ -137,7 +137,7 @@ const float kTolerance = 1e-5;
 - (void)testTensorBufferCreateFromMetalBuffer {
   XCTAssertTrue(litert::HasMetalSupport());
 
-  auto metal_device = tflite::gpu::metal::MetalDevice();
+  auto metal_device = ml_drift::metal::MetalDevice();
   litert::Environment env = [self createEnvironmentWithMetalDevice:&metal_device];
 
   NSString *modelFilePath = [MetalTestHelper pathForModelName:@"simple_model"];

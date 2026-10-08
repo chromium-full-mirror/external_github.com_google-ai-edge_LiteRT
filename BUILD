@@ -23,6 +23,7 @@ exports_files(
 )
 
 exports_files([
+    "PATCH.mldrift_metal",
     "PATCH.perfetto",
     "PATCH.sentencepiece",
     "litert_workspace.bzl",
