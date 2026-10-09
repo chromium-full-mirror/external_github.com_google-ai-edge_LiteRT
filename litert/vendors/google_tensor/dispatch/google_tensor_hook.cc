@@ -46,12 +46,12 @@ void LiteRtVendorHook(LiteRtHookType type, const void* data, size_t size,
 
   switch (type) {
     case kLiteRtHookTypeRuntimeStart:
-      HandlePowerRuntimeStart(context->power_context.get());
+      HandlePowerRuntimeStart(context->power_context.get(), icontext);
       HandleTpuTileTimeRuntimeStart(context->tpu_tile_context.get(), icontext);
       break;
 
     case kLiteRtHookTypeRuntimeStop:
-      HandlePowerRuntimeStop(context->power_context.get());
+      HandlePowerRuntimeStop(context->power_context.get(), icontext);
       HandleTpuTileTimeRuntimeStop(context->tpu_tile_context.get(), icontext);
       break;
 
