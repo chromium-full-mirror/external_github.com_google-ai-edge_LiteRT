@@ -70,6 +70,12 @@ LiteRtStatus LiteRtCreateEnvironment(int num_options,
 
   LITERT_ASSIGN_OR_RETURN(auto env,
                           LiteRtEnvironmentT::CreateWithOptions(options_span));
+  LiteRtAny abi_version_any{};
+  abi_version_any.type = kLiteRtAnyTypeString;
+  abi_version_any.str_value = LITERT_RUNTIME_ABI_VERSION;
+  LITERT_RETURN_IF_ERROR(env->GetOptions().SetOption(
+      LiteRtEnvOption{kLiteRtEnvOptionTagRuntimeAbiVersion, abi_version_any},
+      /*overwrite=*/true));
   litert::TriggerAcceleratorAutomaticRegistration(*env);
 
   // Check if any GPU-related options are present using modern C++ algorithms
