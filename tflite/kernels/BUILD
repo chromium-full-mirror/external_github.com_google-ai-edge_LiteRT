@@ -1064,7 +1064,6 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     copts = tflite_copts(),
     deps = [
-        ":builtin_op_kernels",
         "//tflite:framework_stable",
         "//tflite:util",
         "//tflite/core/c:common",
@@ -3560,3 +3559,14 @@ tflite_combine_cc_tests(
 )
 
 tflite_self_contained_libs_test_suite(name = "self_contained_libs_tests")
+
+cc_test(
+    name = "register_ref_test",
+    srcs = ["register_ref_test.cc"],
+    deps = [
+        ":reference_ops",
+        "//tflite/core/kernels:builtin_ops",
+        "//tflite/schema:schema_fbs",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
