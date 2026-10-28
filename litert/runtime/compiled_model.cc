@@ -36,9 +36,11 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
+#include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/cleanup/cleanup.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/container/flat_hash_set.h"  // from @com_google_absl
+#include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "litert/c/options/litert_cpu_options.h"
 #include "tflite/c/c_api.h"
 #include "tflite/mutable_op_resolver.h"
@@ -120,6 +122,7 @@
 #endif  // !defined(LITERT_DISABLE_EXTERNAL_WEIGHTS)
 #include "tflite/converter/allocation.h"
 #include "tflite/builtin_ops.h"
+#include "tflite/core/api/op_resolver.h"
 #include "tflite/core/api/profiler.h"
 #include "tflite/core/interpreter_builder.h"
 #include "tflite/interpreter.h"
@@ -128,6 +131,7 @@
 #include "tflite/kernels/register.h"
 #include "tflite/kernels/register_ref.h"
 #endif  // LITERT_NO_BUILTIN_OPS
+#include "tflite/schema/schema_generated.h"
 
 #if defined(LITERT_NO_BUILTIN_OPS)
 #include "litert/runtime/stub_op_resolver.h"
@@ -224,6 +228,102 @@ TfLiteRegistration sStubRegistration = {
     .free = StubOpFree,
     .prepare = StubOpPrepare,
     .invoke = StubOpEval,
+};
+
+class CApiForwardingOpResolver : public tflite::OpResolver {
+ public:
+  CApiForwardingOpResolver(
+      const LiteRtOptionsT::OpResolverCallbacks& callbacks,
+      std::vector<std::unique_ptr<TfLiteRegistration>>& owned_registrations)
+      : callbacks_(callbacks), owned_registrations_(owned_registrations) {}
+
+  const TfLiteRegistration* FindOp(tflite::BuiltinOperator op,
+                                   int version) const override {
+    if (callbacks_.find_builtin_op == nullptr) {
+      return nullptr;
+    }
+    const auto key = std::make_pair(static_cast<int>(op), version);
+    {
+      absl::MutexLock lock(mutex_);
+      if (auto it = builtin_cache_.find(key); it != builtin_cache_.end()) {
+        return it->second;
+      }
+    }
+    const TfLiteOperator* op_ext = callbacks_.find_builtin_op(
+        callbacks_.user_data, static_cast<int>(op), version);
+    if (op_ext == nullptr) {
+      return nullptr;
+    }
+    absl::MutexLock lock(mutex_);
+    if (auto it = builtin_cache_.find(key); it != builtin_cache_.end()) {
+      return it->second;
+    }
+    auto new_reg = std::make_unique<TfLiteRegistration>();
+    new_reg->builtin_code = static_cast<int32_t>(op);
+    new_reg->custom_name = nullptr;
+    new_reg->version = version;
+    new_reg->registration_external = const_cast<TfLiteOperator*>(op_ext);
+    const TfLiteRegistration* ptr = new_reg.get();
+    builtin_cache_.emplace(key, ptr);
+    owned_registrations_.push_back(std::move(new_reg));
+    return ptr;
+  }
+
+  const TfLiteRegistration* FindOp(const char* op, int version) const override {
+    if (op == nullptr || callbacks_.find_custom_op == nullptr) {
+      return nullptr;
+    }
+    const auto key = std::make_pair(std::string(op), version);
+    {
+      absl::MutexLock lock(mutex_);
+      if (auto it = custom_cache_.find(key); it != custom_cache_.end()) {
+        return it->second;
+      }
+    }
+    const TfLiteOperator* op_ext =
+        callbacks_.find_custom_op(callbacks_.user_data, op, version);
+    if (op_ext == nullptr) {
+      return nullptr;
+    }
+    absl::MutexLock lock(mutex_);
+    if (auto it = custom_cache_.find(key); it != custom_cache_.end()) {
+      return it->second;
+    }
+    auto new_reg = std::make_unique<TfLiteRegistration>();
+    new_reg->builtin_code = tflite::BuiltinOperator_CUSTOM;
+    new_reg->custom_name = TfLiteOperatorGetCustomName(op_ext);
+    new_reg->version = version;
+    new_reg->registration_external = const_cast<TfLiteOperator*>(op_ext);
+    const TfLiteRegistration* ptr = new_reg.get();
+    custom_cache_.emplace(key, ptr);
+    owned_registrations_.push_back(std::move(new_reg));
+    return ptr;
+  }
+
+ private:
+  LiteRtOptionsT::OpResolverCallbacks callbacks_;
+  mutable absl::Mutex mutex_;
+  std::vector<std::unique_ptr<TfLiteRegistration>>& owned_registrations_
+      ABSL_GUARDED_BY(mutex_);
+  mutable absl::flat_hash_map<std::pair<int, int>, const TfLiteRegistration*>
+      builtin_cache_ ABSL_GUARDED_BY(mutex_);
+  mutable absl::flat_hash_map<std::pair<std::string, int>,
+                              const TfLiteRegistration*>
+      custom_cache_ ABSL_GUARDED_BY(mutex_);
+};
+
+class CApiOpResolver : public tflite::MutableOpResolver {
+ public:
+  CApiOpResolver(
+      const LiteRtOptionsT::OpResolverCallbacks& callbacks,
+      std::vector<std::unique_ptr<TfLiteRegistration>>& owned_registrations)
+      : c_api_forwarder_(callbacks, owned_registrations) {
+    ChainOpResolver(&c_api_forwarder_);
+    may_directly_contain_user_defined_ops_ = true;
+  }
+
+ private:
+  CApiForwardingOpResolver c_api_forwarder_;
 };
 
 #if !defined(LITERT_DISABLE_NPU)
@@ -377,7 +477,8 @@ Expected<void> LiteRtCompiledModelT::InitializeRuntime(
 
   const bool has_user_op_resolver =
       jit_compilation_options &&
-      jit_compilation_options->op_resolver != nullptr;
+      (jit_compilation_options->op_resolver != nullptr ||
+       jit_compilation_options->op_resolver_callbacks.has_value());
   std::unique_ptr<tflite::MutableOpResolver> resolver_storage;
   tflite::MutableOpResolver* resolver = nullptr;
   if (has_user_op_resolver) {
@@ -389,8 +490,14 @@ Expected<void> LiteRtCompiledModelT::InitializeRuntime(
                         "kernels.");
     }
 #endif  // LITERT_NO_BUILTIN_OPS
-    resolver_storage = std::make_unique<tflite::MutableOpResolver>(
-        *jit_compilation_options->op_resolver);
+    if (jit_compilation_options->op_resolver_callbacks.has_value()) {
+      resolver_storage = std::make_unique<CApiOpResolver>(
+          *jit_compilation_options->op_resolver_callbacks,
+          owned_tflite_registrations_);
+    } else {
+      resolver_storage = std::make_unique<tflite::MutableOpResolver>(
+          *jit_compilation_options->op_resolver);
+    }
     resolver = resolver_storage.get();
   } else {
 #ifdef LITERT_NO_BUILTIN_OPS

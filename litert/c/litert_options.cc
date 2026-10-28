@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstddef>
+
 #include "litert/c/internal/litert_logging.h"
 #include "litert/c/litert_common.h"
 #include "litert/c/litert_custom_op_kernel.h"
+#include "litert/c/litert_op_resolver.h"
 #include "litert/c/litert_opaque_options.h"
 #include "litert/cc/litert_macros.h"
 #include "litert/core/options.h"
@@ -85,6 +88,19 @@ LiteRtStatus LiteRtGetOpaqueOptions(LiteRtOptions options,
   LRT_CHECK_NON_NULL(options);
   LRT_CHECK_NON_NULL(opaque_options);
   *opaque_options = options->options;
+  return kLiteRtStatusOk;
+}
+
+LiteRtStatus LiteRtSetOpResolverOption(LiteRtOptions options,
+                                       LiteRtFindBuiltinOpFunc find_builtin_op,
+                                       LiteRtFindCustomOpFunc find_custom_op,
+                                       void* user_data) {
+  LRT_CHECK_NON_NULL(options);
+  options->op_resolver_callbacks = LiteRtOptionsT::OpResolverCallbacks{
+      .find_builtin_op = find_builtin_op,
+      .find_custom_op = find_custom_op,
+      .user_data = user_data,
+  };
   return kLiteRtStatusOk;
 }
 
