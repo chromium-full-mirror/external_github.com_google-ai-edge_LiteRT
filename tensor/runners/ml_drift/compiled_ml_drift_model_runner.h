@@ -643,10 +643,13 @@ class CompiledMlDriftModelRunner {
         weights_tensor_mld.shape = weights_ohwi;
         weights_tensor_mld.data = std::move(unpacked_data);
 
-        int elements_count =
-            ml_drift::GetTotalElementsCountForLayout(desc, weights_ohwi);
-        size_t rearranged_data_size =
-            (elements_count * ml_drift::SizeInBitsOf(desc.type) + 7) / 8;
+        const size_t elements_count = static_cast<size_t>(
+            ml_drift::GetTotalElementsCountForLayout(desc, weights_ohwi));
+        const size_t rearranged_data_size =
+            (elements_count *
+                 static_cast<size_t>(ml_drift::SizeInBitsOf(desc.type)) +
+             7) /
+            8;
         std::vector<uint8_t> rearranged_data(rearranged_data_size);
 
         if (desc.type == ml_drift::DataType::kUint4 ||
@@ -669,7 +672,8 @@ class CompiledMlDriftModelRunner {
           weights_td = ml_drift::TensorDescriptor(
               desc.type, ml_drift::TensorStorageType::kBuffer,
               ml_drift::Layout::kLinear);
-          weights_td.SetBHWDCShape(ml_drift::BHWDC(1, 1, 1, 1, elements_count));
+          weights_td.SetBHWDCShape(
+              ml_drift::BHWDC(1, 1, 1, 1, static_cast<int>(elements_count)));
         } else {
           ml_drift::DataType texture_type = ml_drift::DataType::kUint32;
           if (desc.type == ml_drift::DataType::kUint4) {
