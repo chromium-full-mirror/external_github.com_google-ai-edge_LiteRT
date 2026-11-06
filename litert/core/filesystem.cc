@@ -19,9 +19,17 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>  // NOLINT
+#include <limits>
 #include <string>
 #include <system_error>  // NOLINT
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -87,13 +95,93 @@ std::string Stem(absl::string_view path) {
 
 bool Exists(absl::string_view path) { return StdExists(MakeStdPath(path)); }
 
-Expected<size_t> Size(absl::string_view path) {
-  auto std_path = MakeStdPath(path);
-  if (!StdExists(std_path)) {
-    return Error(kLiteRtStatusErrorNotFound,
-                 absl::StrCat("File not found: ", path));
+Expected<bool> ExistsWithStatus(absl::string_view path) {
+  std::error_code ec;
+  const bool exists = std::filesystem::exists(MakeStdPath(path), ec);
+  if (ec) {
+    return Error(kLiteRtStatusErrorFileIO,
+                 absl::StrCat("Cannot inspect ", path, ": ", ec.message()));
   }
-  return StdSize(std_path);
+  return exists;
+}
+
+Expected<bool> IsRegularFile(absl::string_view path) {
+  std::error_code ec;
+  const bool regular = std::filesystem::is_regular_file(MakeStdPath(path), ec);
+  if (ec == std::errc::no_such_file_or_directory ||
+      ec == std::errc::not_a_directory) {
+    return false;
+  }
+  if (ec) {
+    return Error(kLiteRtStatusErrorFileIO,
+                 absl::StrCat("Cannot inspect ", path, ": ", ec.message()));
+  }
+  return regular;
+}
+
+Expected<std::string> AbsolutePath(absl::string_view path) {
+  std::error_code ec;
+  const auto absolute = std::filesystem::absolute(MakeStdPath(path), ec);
+  if (ec) {
+    return Error(kLiteRtStatusErrorFileIO,
+                 absl::StrCat("Cannot resolve ", path, ": ", ec.message()));
+  }
+  return absolute.lexically_normal().generic_string();
+}
+
+Expected<std::string> CanonicalPath(absl::string_view path) {
+  std::error_code ec;
+  const auto canonical = std::filesystem::canonical(MakeStdPath(path), ec);
+  if (ec) {
+    return Error(kLiteRtStatusErrorFileIO,
+                 absl::StrCat("Cannot resolve ", path, ": ", ec.message()));
+  }
+  return canonical.generic_string();
+}
+
+Expected<void> RenameFile(absl::string_view source,
+                         absl::string_view destination) {
+#if defined(_WIN32)
+  if (!MoveFileExW(MakeStdPath(source).c_str(), MakeStdPath(destination).c_str(),
+                  MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    return Error(kLiteRtStatusErrorFileIO,
+                 absl::StrCat("Cannot rename ", source, " to ", destination,
+                              ": Windows error ", GetLastError()));
+  }
+#else
+  std::error_code ec;
+  std::filesystem::rename(MakeStdPath(source), MakeStdPath(destination), ec);
+  if (ec) {
+    return Error(kLiteRtStatusErrorFileIO,
+                 absl::StrCat("Cannot rename ", source, " to ", destination,
+                              ": ", ec.message()));
+  }
+#endif
+  return {};
+}
+
+Expected<size_t> Size(absl::string_view path) {
+  const auto std_path = MakeStdPath(path);
+  std::error_code ec;
+  if (std::filesystem::is_directory(std_path, ec)) {
+    return Error(kLiteRtStatusErrorFileIO,
+                 absl::StrCat("Cannot get file size of directory: ", path));
+  }
+  ec.clear();
+  const auto bytes = std::filesystem::file_size(std_path, ec);
+  if (ec) {
+    const auto status = ec == std::errc::no_such_file_or_directory ||
+                                ec == std::errc::not_a_directory
+                            ? kLiteRtStatusErrorNotFound
+                            : kLiteRtStatusErrorFileIO;
+    return Error(
+        status,
+        absl::StrCat("Cannot get file size: ", path, ": ", ec.message()));
+  }
+  if (bytes > std::numeric_limits<size_t>::max()) {
+    return Error(kLiteRtStatusErrorFileIO, "File size exceeds size_t");
+  }
+  return static_cast<size_t>(bytes);
 }
 
 Expected<absl::Time> GetLastWriteTime(absl::string_view path) {
@@ -141,16 +229,25 @@ Expected<OwningBufferRef<uint8_t>> LoadBinaryFile(absl::string_view path) {
 }
 
 Expected<std::vector<std::string>> ListDir(absl::string_view path) {
-  auto std_path = MakeStdPath(path);
-  if (!StdExists(std_path)) {
-    return Error(kLiteRtStatusErrorNotFound,
-                 absl::StrCat("Directory not found: ", path));
+  std::error_code ec;
+  std::filesystem::directory_iterator it(MakeStdPath(path), ec), end;
+  if (ec) {
+    return Error(ec == std::errc::no_such_file_or_directory
+                     ? kLiteRtStatusErrorNotFound
+                     : kLiteRtStatusErrorFileIO,
+                 absl::StrCat("Cannot list directory: ", path, ": ", ec.message()));
   }
   std::vector<std::string> res;
-  for (const auto& entry : std::filesystem::directory_iterator(std_path)) {
-    if (std::filesystem::is_regular_file(entry)) {
-      res.push_back(entry.path().generic_string());
-    }
+  while (it != end) {
+    const bool regular = it->is_regular_file(ec);
+    if (ec) break;
+    if (regular) res.push_back(it->path().generic_string());
+    it.increment(ec);
+    if (ec) break;
+  }
+  if (ec) {
+    return Error(kLiteRtStatusErrorFileIO,
+                 absl::StrCat("Cannot list directory: ", path, ": ", ec.message()));
   }
   return res;
 }
@@ -192,18 +289,13 @@ bool IsDir(absl::string_view path) {
 }
 
 Expected<void> MkDir(absl::string_view path) {
-  if (IsDir(path)) {
-    return {};
-  }
-  if (Exists(path)) {
-    return Error(kLiteRtStatusErrorAlreadyExists,
-                 absl::StrCat("Path exists and is not a directory: ", path));
-  }
-  auto std_path = MakeStdPath(path);
-  const auto stat = std::filesystem::create_directories(std_path);
-  if (!stat) {
-    return Error(kLiteRtStatusErrorFileIO,
-                 absl::StrCat("Failed to create directory: ", path));
+  std::error_code ec;
+  std::filesystem::create_directories(MakeStdPath(path), ec);
+  if (ec) {
+    return Error(ec == std::errc::file_exists ? kLiteRtStatusErrorAlreadyExists
+                                            : kLiteRtStatusErrorFileIO,
+                 absl::StrCat("Failed to create directory: ", path, ": ",
+                              ec.message()));
   }
   return {};
 }
@@ -248,7 +340,9 @@ Expected<void> RmDir(std::string path_to_remove) {
                               ", error: ", error_code.message()));
   }
 
-  if (!Exists(path_to_remove)) {
+  auto remaining = ExistsWithStatus(path_to_remove);
+  if (!remaining) return remaining.Error();
+  if (!*remaining) {
     if (count > 0) {
       LITERT_LOG(LITERT_INFO,
                  "Successfully removed directory and its contents: %s (%ju "

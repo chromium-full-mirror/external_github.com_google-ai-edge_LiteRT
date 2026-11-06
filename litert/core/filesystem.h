@@ -42,6 +42,21 @@ void Touch(absl::string_view path);
 // Does this file exist.
 bool Exists(absl::string_view path);
 
+// Unlike Exists, reports inspection errors separately from a missing path.
+Expected<bool> ExistsWithStatus(absl::string_view path);
+
+Expected<bool> IsRegularFile(absl::string_view path);
+
+// Resolve relative components without requiring the path to exist.
+Expected<std::string> AbsolutePath(absl::string_view path);
+
+// Resolve symbolic links; the path must exist.
+Expected<std::string> CanonicalPath(absl::string_view path);
+
+// Atomically rename a file, replacing an existing destination file. The paths
+// must be on the same filesystem. Neither file is removed when renaming fails.
+Expected<void> RenameFile(absl::string_view source, absl::string_view destination);
+
 // Is this a directory.
 bool IsDir(absl::string_view path);
 
