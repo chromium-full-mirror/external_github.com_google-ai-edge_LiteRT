@@ -83,6 +83,78 @@ TEST(FilesystemTest, Size) {
   EXPECT_EQ(*size, 4);
 }
 
+TEST(FilesystemTest, ExpectedFileOperationsRejectDirectoriesAndInvalidParents) {
+  const std::string dir = Join({::testing::TempDir(), "expected_file_errors"});
+  ASSERT_TRUE(MkDir(dir));
+  const std::string file = Join({dir, "file.txt"});
+  WriteFile(file, "content");
+  EXPECT_FALSE(Size(dir));
+  EXPECT_FALSE(ListDir(file));
+  EXPECT_FALSE(MkDir(file));
+  EXPECT_FALSE(MkDir(Join({file, "child"})));
+  EXPECT_FALSE(Size(Join({dir, "missing"})));
+  EXPECT_FALSE(ListDir(Join({dir, "missing"})));
+}
+
+TEST(FilesystemTest, FileInspectionDistinguishesMissingFilesAndDirectories) {
+  const std::string dir = Join({::testing::TempDir(), "inspect_file_test"});
+  ASSERT_TRUE(MkDir(dir));
+  const std::string file = Join({dir, "file.txt"});
+  WriteFile(file, "content");
+  auto exists = ExistsWithStatus(file);
+  ASSERT_TRUE(exists);
+  EXPECT_TRUE(*exists);
+  auto regular = IsRegularFile(file);
+  ASSERT_TRUE(regular);
+  EXPECT_TRUE(*regular);
+  regular = IsRegularFile(dir);
+  ASSERT_TRUE(regular);
+  EXPECT_FALSE(*regular);
+  const std::string missing = Join({dir, "missing"});
+  exists = ExistsWithStatus(missing);
+  ASSERT_TRUE(exists);
+  EXPECT_FALSE(*exists);
+  regular = IsRegularFile(missing);
+  ASSERT_TRUE(regular);
+  EXPECT_FALSE(*regular);
+}
+
+TEST(FilesystemTest, AbsoluteAndCanonicalPathsHandleMissingComponents) {
+  const std::string dir = Join({::testing::TempDir(), "resolve_path_test"});
+  ASSERT_TRUE(MkDir(dir));
+  const std::string file = Join({dir, "file.txt"});
+  WriteFile(file, "content");
+  auto absolute = AbsolutePath(Join({dir, "missing", "..", "file.txt"}));
+  ASSERT_TRUE(absolute);
+  auto expected = AbsolutePath(file);
+  ASSERT_TRUE(expected);
+  EXPECT_EQ(*absolute, *expected);
+  auto canonical = CanonicalPath(Join({dir, ".", "file.txt"}));
+  ASSERT_TRUE(canonical);
+  auto expected_canonical = CanonicalPath(file);
+  ASSERT_TRUE(expected_canonical);
+  EXPECT_EQ(*canonical, *expected_canonical);
+  EXPECT_FALSE(CanonicalPath(Join({dir, "missing"})));
+}
+
+TEST(FilesystemTest, RenameReplacesDestinationAndPreservesItOnFailure) {
+  const std::string dir = Join({::testing::TempDir(), "rename_file_test"});
+  ASSERT_TRUE(MkDir(dir));
+  const std::string source = Join({dir, "source.txt"});
+  const std::string destination = Join({dir, "destination.txt"});
+  WriteFile(source, "new");
+  WriteFile(destination, "old");
+  ASSERT_TRUE(RenameFile(source, destination));
+  EXPECT_FALSE(Exists(source));
+  auto content = LoadBinaryFile(destination);
+  ASSERT_TRUE(content);
+  EXPECT_EQ(absl::string_view(content->StrData(), content->Size()), "new");
+  EXPECT_FALSE(RenameFile(source, destination));
+  content = LoadBinaryFile(destination);
+  ASSERT_TRUE(content);
+  EXPECT_EQ(absl::string_view(content->StrData(), content->Size()), "new");
+}
+
 TEST(FilesystemTest, LoadBinaryFile) {
   const std::string file = Join({::testing::TempDir(), "test_file_load"});
   const std::string content = "12345";
